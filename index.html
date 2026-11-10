@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://pmtneugmshrpchloxmge.supabase.co; img-src data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://pmtneugmshrpchloxmge.supabase.co; img-src data: blob:; frame-src blob:; base-uri 'none'; form-action 'none'">
 <title>Digital Doc</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#142340;font:15px system-ui,sans-serif}aside{background:#101e38;color:white;width:234px;min-height:100vh;padding:28px 18px;position:fixed}strong{font-size:23px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:54px}.logo{background:#4779ff;padding:8px;border-radius:11px}nav{display:grid;gap:8px}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0;border-radius:8px;padding:10px 14px;background:#eaf0ff;color:#234493}nav button{text-align:left;background:transparent;color:#c7d3ea}nav button.active{background:#253d68;color:white}main{margin-left:234px;padding:34px;max-width:1440px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.primary{background:#2959df;color:white}small,.muted{color:#586983}.eyebrow{color:#315bcb;font-size:12px;letter-spacing:2px;font-weight:800}h1{margin:8px 0;font-size:32px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:26px 0}.card,section{background:white;border:1px solid #e0e7f2;border-radius:14px;padding:20px}.number{display:block;font-size:29px;margin-top:8px}.tools{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}input,select,textarea{border:1px solid #cdd8e8;border-radius:8px;padding:9px;background:white;color:inherit;max-width:100%}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #edf1f7}th{color:#586983;font-weight:500}.badge{display:inline-block;border-radius:30px;background:#edf1fa;padding:5px 10px;white-space:nowrap}.s1{background:#fff1d3;color:#805300}.s2{background:#dff7eb;color:#176543}.s3{background:#ffe9e7;color:#972d27}.scroll{overflow:auto}dialog{border:0;border-radius:16px;padding:24px;width:min(92vw,510px);color:inherit}dialog::backdrop{background:#101e3870}form,label{display:grid;gap:10px}h2{margin:0 0 12px}footer{margin-top:22px}.team{margin-top:30px;color:#c7d3ea}@media(max-width:720px){aside{position:static;width:auto;min-height:0;padding:14px}.brand{margin-bottom:10px}nav{display:flex;flex-wrap:wrap}.team{display:none}main{margin:0;padding:16px}.cards{gap:7px}.card,section{padding:12px}h1{font-size:23px}}
@@ -82,7 +82,7 @@ async function load(){
  let records=[],team=[];
  try{
   [records,team]=await Promise.all([
-   list('/rest/v1/digital_doc_records?select=id,owner,name,category,file_path,reviewer,status,created_at,access_map,return_reason&order=created_at.desc,id.desc',token),
+   list('/rest/v1/digital_doc_records?select=id,owner,name,category,file_path,reviewer,status,created_at,access_map,return_reason,review_history&order=created_at.desc,id.desc',token),
    send('/rest/v1/rpc/digital_doc_team',{},token).then(r=>r.json())
   ]);
   ready=true;
@@ -134,6 +134,30 @@ async function download(d){
  link.href=URL.createObjectURL(blob);link.download=originalName(d.file_path);link.click();
  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
 }
+let previewUrl;
+get('modal').addEventListener('close',()=>{
+ if(previewUrl)URL.revokeObjectURL(previewUrl);
+ previewUrl=undefined;
+});
+async function preview(d){
+ const panel=get('filePreview'), token=session;
+ panel.textContent='ກຳລັງໂຫຼດ…';
+ const path=d.file_path.split('/').map(encodeURIComponent).join('/');
+ const response=await request(storage+'/authenticated/'+bucket+'/'+path,{token});
+ const bytes=await response.arrayBuffer();
+ if(session!==token||!panel.isConnected||!get('modal').open)return;
+ const ext=originalName(d.file_path).split('.').pop().toLowerCase();
+ const mime={pdf:'application/pdf',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg'}[ext];
+ if(previewUrl)URL.revokeObjectURL(previewUrl);
+ previewUrl=URL.createObjectURL(new Blob([bytes],{type:mime}));
+ const element=document.createElement(ext==='pdf'?'iframe':'img');
+ element.src=previewUrl;
+ element.title='ເບິ່ງເອກະສານ';
+ if(ext==='pdf')element.style.height='60vh';
+ else element.alt=d.name;
+ element.style.width='100%';
+ panel.replaceChildren(element);
+}
 function show(d){
  const m=get('modal');
  const owned=d?.owner===me.id;
@@ -142,6 +166,7 @@ function show(d){
  const edit=d&&ready&&(owned||access==='edit');
  const canDownload=d&&(owned||['download','edit'].includes(access)||me.role==='admin'||d.status==='legacy');
  const submit=owned&&ready&&['draft','returned'].includes(d.status);
+ const canPreview=canDownload&&/\.(pdf|png|jpe?g)$/i.test(originalName(d.file_path));
  const review=d?.status==='pending'&&d.reviewer===me.id&&canDownload;
  const reviewer=people.find(p=>p.user_id===d?.reviewer);
  const selectable=people.filter(p=>p.user_id!==me.id);
@@ -152,10 +177,14 @@ function show(d){
  m.innerHTML='<form><h2>'+escape(d?.name||'ເພີ່ມເອກະສານ')+'</h2>'+
  (d?'<p>'+escape(states[d.status])+(reviewer?' · '+escape(reviewer.email):'')+'</p>':'')+
  (d?.return_reason?'<p style="white-space:pre-wrap;overflow-wrap:anywhere"><strong>ເຫດຜົນທີ່ສົ່ງກັບ</strong><br>'+escape(d.return_reason)+'</p>':'')+
- (review?'<label>ເຫດຜົນຕອນສົ່ງກັບ<textarea name="reason" maxlength="1000" rows="3"></textarea></label>':'')+
+ (d?.review_history?.length?'<details open><summary>ປະຫວັດການກວດ</summary><ol>'+d.review_history.map(entry=>{
+  const author=people.find(p=>p.user_id===entry.by)?.email||'ສະມາຊິກ';
+  return '<li><b>'+escape(states[entry.action])+'</b> · '+escape(author)+' · '+escape(new Date(entry.at).toLocaleString())+(entry.comment?'<p style="white-space:pre-wrap;overflow-wrap:anywhere">'+escape(entry.comment)+'</p>':'')+'</li>';
+ }).join('')+'</ol></details>':'')+
+ ((review||(submit&&allowedReviewers.length))?'<label>ຄອມເມັ້ນ (ຕ້ອງໃສ່ເມື່ອສົ່ງກັບ)<textarea name="reason" maxlength="1000" rows="3"></textarea></label>':'')+
  fields+(!d?'<label>ໄຟລ໌ (ສູງສຸດ 10 MB)<input name="file" type="file" required></label>':'')+
- shareFields+(canDownload?'<button type="button" id="download">ດາວໂຫຼດ</button>':'')+
- (submit&&allowedReviewers.length?'<label>ຜູ້ກວດ<select name="assigned"><option value="">ເລືອກຜູ້ກວດ</option>'+allowedReviewers.map(p=>'<option value="'+escape(p.user_id)+'">'+escape(p.email)+'</option>').join('')+'</select></label>':'')+
+ shareFields+(canPreview?'<button type="button" id="preview">ເປີດເບິ່ງໄຟລ໌</button><div id="filePreview" role="status"></div>':'')+(canDownload?'<button type="button" id="download">ດາວໂຫຼດ</button>':'')+
+ (submit&&allowedReviewers.length?'<label>ຜູ້ກວດ<select name="assigned"><option value="">ເລືອກຜູ້ກວດ</option>'+allowedReviewers.map(p=>'<option value="'+escape(p.user_id)+'" '+(p.user_id===d.reviewer?'selected':'')+'>'+escape(p.email)+'</option>').join('')+'</select></label>':'')+
  '<p id="modalError" role="status"></p><div class="tools"><button type="button" id="close">ປິດ</button>'+
  (!d?'<button class="primary" value="upload">ອັບໂຫຼດ</button>':'')+
  (canTrash?'<button value="trash" formnovalidate class="s3">ລົບເອກະສານ</button>':'')+
@@ -163,6 +192,12 @@ function show(d){
  (submit&&allowedReviewers.length?'<button value="pending">ສົ່ງໃຫ້ກວດ</button>':'')+
  (review?'<button class="primary" value="approved">ອະນຸມັດ</button><button value="returned" formnovalidate>ສົ່ງກັບ</button>':'')+'</div></form>';
  get('close').onclick=()=>m.close();
+ if(canPreview)get('preview').onclick=async()=>{
+  const button=get('preview'),panel=get('filePreview');
+  button.disabled=true;
+  try{await preview(d)}catch{if(panel.isConnected)panel.textContent='ເປີດໄຟລ໌ບໍ່ສຳເລັດ.'}
+  finally{button.disabled=false}
+ };
  if(canDownload)get('download').onclick=()=>download(d).catch(modalError);
  m.querySelector('form').onsubmit=async event=>{
   event.preventDefault();
@@ -190,7 +225,7 @@ function show(d){
     if(action==='pending'&&!fields.get('assigned')){get('modalError').textContent='ກະລຸນາເລືອກຜູ້ກວດ.';return}
     const reason=fields.get('reason')?.trim()||null;
     if(action==='returned'&&!reason){get('modalError').textContent='ກະລຸນາໃສ່ເຫດຜົນທີ່ສົ່ງກັບ.';form.elements.reason.focus();return}
-    await send('/rest/v1/rpc/digital_doc_review_action',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null,reason},token);
+    await send('/rest/v1/rpc/digital_doc_review_exchange',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null,reason},token);
    }
    m.close();if(reading)await reading.catch(()=>{});if(session!==token)return;await load();status('ບັນທຶກສຳເລັດ.');
   }catch(error){if(m.open)modalError(error);else report(error)}
