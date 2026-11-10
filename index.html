@@ -46,7 +46,7 @@ async function request(path,{method='GET',body,type='application/json',token=ses
 
 const tabs=['ໜ້າຫຼັກ','ເອກະສານ','ກວດອະນຸມັດ','ສະມາຊິກ'];
 const groups=['ບໍລິຫານ','ການເງິນ','ລາຍງານ','ອື່ນໆ'];
-const states={draft:'ສະບັບຮ່າງ',pending:'ລໍຖ້າກວດ',approved:'ອະນຸມັດແລ້ວ',returned:'ສົ່ງກັບໃຫ້ແກ້',legacy:'ໄຟລ໌ເດີມ'};
+const states={draft:'ສະບັບຮ່າງ',pending:'ລໍຖ້າກວດ',revision:'ສົ່ງໄຟລ໌ສະບັບແກ້',approved:'ສົມບູນ',returned:'ສົ່ງກັບໃຫ້ແກ້',legacy:'ໄຟລ໌ເດີມ'};
 const colors={pending:'s1',approved:'s2',returned:'s3'};
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let me, people=[], docs=[], page=0, ready=false;
@@ -62,7 +62,7 @@ document.addEventListener('visibilitychange',sync);
 const permissions={view:"ເບິ່ງລາຍລະອຽດ ແລະ Preview",download:"ດາວໂຫຼດໄຟລ໌",edit:"ແກ້ລາຍລະອຽດ ແລະ ດາວໂຫຼດ"};
 const send=(path,data,token=session)=>request(path,{method:'POST',body:JSON.stringify(data),token});
 function originalName(path){
- const name=path.replace(/^[a-f0-9-]{36}--/,'');
+ const name=path.split('/').pop().replace(/^[a-f0-9-]{36}--/,'');
  try{return decodeURIComponent(name.replaceAll('_pct_','%'))}catch{return name}
 }
 async function list(path,token,body){
@@ -82,7 +82,7 @@ async function load(){
  let records=[],team=[];
  try{
   [records,team]=await Promise.all([
-   list('/rest/v1/digital_doc_records?select=id,owner,name,category,file_path,reviewer,status,created_at,access_map,return_reason,review_history&order=created_at.desc,id.desc',token),
+   list('/rest/v1/digital_doc_records?select=id,owner,name,category,file_path,reviewer,status,created_at,access_map,return_reason,review_history,revision_path&order=created_at.desc,id.desc',token),
    send('/rest/v1/rpc/digital_doc_team',{},token).then(r=>r.json())
   ]);
   ready=true;
@@ -93,7 +93,7 @@ async function load(){
  if(session!==token)return;
  people=team;
  const indexed=new Set(records.map(d=>d.file_path));
- docs=[...records,...files.filter(f=>f.id&&!indexed.has(f.name)).map(f=>({id:f.id,name:originalName(f.name),file_path:f.name,created_at:f.created_at,status:'legacy'}))];
+ docs=[...records,...files.filter(f=>f.id&&!f.name.startsWith('revisions/')&&!indexed.has(f.name)).map(f=>({id:f.id,name:originalName(f.name),file_path:f.name,created_at:f.created_at,status:'legacy'}))];
  if(get('rows')){updateCards();rows()}
  else render();
 }
@@ -117,7 +117,7 @@ function render(){
 }
 function rows(){
  const query=get('query').value.trim().toLowerCase(), group=get('category').value;
- const filtered=docs.filter(d=>(page!==2||(d.status==='pending'&&d.reviewer===me.id))&&(!group||d.category===group)&&(d.name+' '+d.id).toLowerCase().includes(query));
+ const filtered=docs.filter(d=>(page!==2||(d.status==='pending'&&(d.reviewer===me.id||me.role==='admin')))&&(!group||d.category===group)&&(d.name+' '+d.id).toLowerCase().includes(query));
  get('rows').innerHTML=filtered.map(d=>'<tr><td><button data-doc="'+escape(d.id)+'">'+escape(d.name)+'</button></td><td>'+escape(d.category||'—')+'</td><td>'+escape(d.created_at?.slice(0,10)||'—')+'</td><td><span class="badge '+(colors[d.status]||'')+'">'+escape(states[d.status])+'</span></td></tr>').join('')||'<tr><td colspan="4">ບໍ່ພົບເອກະສານ</td></tr>';
 }
 function report(error){
@@ -159,6 +159,7 @@ async function preview(d, canDownload){
  panel.replaceChildren(element);
 }
 function show(d){
+ if(d?.revision_path)d={...d,file_path:d.revision_path};
  const m=get('modal');
  const owned=d?.owner===me.id;
  const access=d?.access_map?.[me.id];
@@ -167,7 +168,9 @@ function show(d){
  const canDownload=d&&(owned||['download','edit'].includes(access)||me.role==='admin'||d.status==='legacy');
  const submit=owned&&ready&&['draft','returned'].includes(d.status);
  const canPreview=d&&(canDownload||access==='view')&&/\.(pdf|png|jpe?g)$/i.test(originalName(d.file_path));
+ const adminReview=d?.status==='pending'&&me.role==='admin';
  const review=d?.status==='pending'&&d.reviewer===me.id&&canDownload;
+ const canRevise=edit&&d.status!=='approved'&&me.role!=='admin';
  const reviewer=people.find(p=>p.user_id===d?.reviewer);
  const selectable=people.filter(p=>p.user_id!==me.id);
  const sharing=(!d||owned)&&ready;
@@ -181,8 +184,9 @@ function show(d){
   const author=people.find(p=>p.user_id===entry.by)?.email||'ສະມາຊິກ';
   return '<li><b>'+escape(states[entry.action])+'</b> · '+escape(author)+' · '+escape(new Date(entry.at).toLocaleString())+(entry.comment?'<p style="white-space:pre-wrap;overflow-wrap:anywhere">'+escape(entry.comment)+'</p>':'')+'</li>';
  }).join('')+'</ol></details>':'')+
- ((review||(submit&&allowedReviewers.length))?'<label>ຄອມເມັ້ນ (ຕ້ອງໃສ່ເມື່ອສົ່ງກັບ)<textarea name="reason" maxlength="1000" rows="3"></textarea></label>':'')+
+ ((canRevise||review||adminReview||(submit&&allowedReviewers.length))?'<label>ຄອມເມັ້ນ (ຕ້ອງໃສ່ເມື່ອສົ່ງກັບ)<textarea name="reason" maxlength="1000" rows="3"></textarea></label>':'')+
  fields+(!d?'<label>ໄຟລ໌ (ສູງສຸດ 10 MB)<input name="file" type="file" required></label>':'')+
+ (canRevise?'<label>ໄຟລ໌ສະບັບແກ້ (ສູງສຸດ 10 MB)<input type="file" name="revision" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.csv"></label>':'')+
  shareFields+(canPreview?'<button type="button" id="preview">ເປີດເບິ່ງໄຟລ໌</button><div id="filePreview" role="status"></div>':'')+(canDownload?'<button type="button" id="download">ດາວໂຫຼດ</button>':'')+
  (submit&&allowedReviewers.length?'<label>ຜູ້ກວດ<select name="assigned"><option value="">ເລືອກຜູ້ກວດ</option>'+allowedReviewers.map(p=>'<option value="'+escape(p.user_id)+'" '+(p.user_id===d.reviewer?'selected':'')+'>'+escape(p.email)+'</option>').join('')+'</select></label>':'')+
  '<p id="modalError" role="status"></p><div class="tools"><button type="button" id="close">ປິດ</button>'+
@@ -190,7 +194,9 @@ function show(d){
  (canTrash?'<button value="trash" formnovalidate class="s3">ລົບເອກະສານ</button>':'')+
  (edit?'<button class="primary" value="save">ບັນທຶກ</button>':'')+
  (submit&&allowedReviewers.length?'<button value="pending">ສົ່ງໃຫ້ກວດ</button>':'')+
- (review?'<button class="primary" value="approved">ອະນຸມັດ</button><button value="returned" formnovalidate>ສົ່ງກັບ</button>':'')+'</div></form>';
+ (canRevise?'<button class="primary" value="revision" formnovalidate>ສົ່ງໄຟລ໌ສະບັບແກ້</button>':'')+
+ (adminReview?'<button class="primary" value="approved" formnovalidate>ຢືນຢັນສົມບູນ</button>':'')+
+ ((review||adminReview)?'<button value="returned" formnovalidate>ສົ່ງກັບໃຫ້ແກ້</button>':'')+'</div></form>';
  get('close').onclick=()=>m.close();
  if(canPreview)get('preview').onclick=async()=>{
   const button=get('preview'),panel=get('filePreview');
@@ -216,6 +222,17 @@ function show(d){
      try{await send('/rest/v1/digital_doc_records',{name:title,category:fields.get('category'),file_path:path,access_map:accessMap},token)}
      catch{m.close();await load();status('ໄຟລ໌ຖືກອັບໂຫຼດແລ້ວ ແຕ່ບັນທຶກລາຍລະອຽດບໍ່ສຳເລັດ. ໄຟລ໌ຢູ່ໃນລາຍການໄຟລ໌ເດີມ.');return}
     }
+   }else if(action==='revision'){
+    const file=fields.get('revision');
+    if(!file?.size||file.size>10485760||!/\.(pdf|docx?|xlsx?|pptx?|png|jpe?g|txt|csv)$/i.test(file.name)){
+     get('modalError').textContent='ກະລຸນາເລືອກໄຟລ໌ສະບັບແກ້ທີ່ຮອງຮັບ (ສູງສຸດ 10 MB).';return;
+    }
+    const ext=file.name.split('.').pop().toLowerCase();
+    const stem=file.name.slice(0,-ext.length-1).normalize('NFC').replace(/[^\p{L}\p{N}\p{M}._ -]/gu,'_').slice(0,85);
+    const path='revisions/'+d.id+'/'+crypto.randomUUID()+'--'+encodeURIComponent(stem).replaceAll('%','_pct_')+'.'+ext;
+    const url=storage+'/'+bucket+'/'+path.split('/').map(encodeURIComponent).join('/');
+    await request(url,{method:'POST',body:file,type:'application/octet-stream',token});
+    await send('/rest/v1/rpc/digital_doc_submit_revision',{record_id:d.id,new_path:path,expected_path:d.file_path,note:fields.get('reason')?.trim()||null},token);
    }else if(action==='trash'){
     if(!confirm('ລົບເອກະສານ “'+d.name+'” ອອກຈາກລາຍການ?'))return;
     await send('/rest/v1/rpc/digital_doc_trash',{record_id:d.id},token);
@@ -225,7 +242,9 @@ function show(d){
     if(action==='pending'&&!fields.get('assigned')){get('modalError').textContent='ກະລຸນາເລືອກຜູ້ກວດ.';return}
     const reason=fields.get('reason')?.trim()||null;
     if(action==='returned'&&!reason){get('modalError').textContent='ກະລຸນາໃສ່ເຫດຜົນທີ່ສົ່ງກັບ.';form.elements.reason.focus();return}
-    await send('/rest/v1/rpc/digital_doc_review_exchange',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null,reason},token);
+    if(adminReview&&['approved','returned'].includes(action)){
+     await send('/rest/v1/rpc/digital_doc_admin_decision',{record_id:d.id,expected_path:d.file_path,decision:action,note:reason},token);
+    }else await send('/rest/v1/rpc/digital_doc_review_exchange',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null,reason},token);
    }
    m.close();if(reading)await reading.catch(()=>{});if(session!==token)return;await load();status('ບັນທຶກສຳເລັດ.');
   }catch(error){if(m.open)modalError(error);else report(error)}
