@@ -59,7 +59,7 @@ function sync(){
  job.catch(error=>{if(session===token)report(error)}).finally(()=>{if(reading===job)reading=undefined});
 }
 document.addEventListener('visibilitychange',sync);
-const permissions={view:"ເບິ່ງລາຍລະອຽດ",download:"ດາວໂຫຼດໄຟລ໌",edit:"ແກ້ລາຍລະອຽດ ແລະ ດາວໂຫຼດ"};
+const permissions={view:"ເບິ່ງລາຍລະອຽດ ແລະ Preview",download:"ດາວໂຫຼດໄຟລ໌",edit:"ແກ້ລາຍລະອຽດ ແລະ ດາວໂຫຼດ"};
 const send=(path,data,token=session)=>request(path,{method:'POST',body:JSON.stringify(data),token});
 function originalName(path){
  const name=path.replace(/^[a-f0-9-]{36}--/,'');
@@ -139,7 +139,7 @@ get('modal').addEventListener('close',()=>{
  if(previewUrl)URL.revokeObjectURL(previewUrl);
  previewUrl=undefined;
 });
-async function preview(d){
+async function preview(d, canDownload){
  const panel=get('filePreview'), token=session;
  panel.textContent='ກຳລັງໂຫຼດ…';
  const path=d.file_path.split('/').map(encodeURIComponent).join('/');
@@ -151,7 +151,7 @@ async function preview(d){
  if(previewUrl)URL.revokeObjectURL(previewUrl);
  previewUrl=URL.createObjectURL(new Blob([bytes],{type:mime}));
  const element=document.createElement(ext==='pdf'?'iframe':'img');
- element.src=previewUrl;
+ element.src=previewUrl+(ext==='pdf'&&!canDownload?'#toolbar=0':'');
  element.title='ເບິ່ງເອກະສານ';
  if(ext==='pdf')element.style.height='60vh';
  else element.alt=d.name;
@@ -166,7 +166,7 @@ function show(d){
  const edit=d&&ready&&(owned||access==='edit');
  const canDownload=d&&(owned||['download','edit'].includes(access)||me.role==='admin'||d.status==='legacy');
  const submit=owned&&ready&&['draft','returned'].includes(d.status);
- const canPreview=canDownload&&/\.(pdf|png|jpe?g)$/i.test(originalName(d.file_path));
+ const canPreview=d&&(canDownload||access==='view')&&/\.(pdf|png|jpe?g)$/i.test(originalName(d.file_path));
  const review=d?.status==='pending'&&d.reviewer===me.id&&canDownload;
  const reviewer=people.find(p=>p.user_id===d?.reviewer);
  const selectable=people.filter(p=>p.user_id!==me.id);
@@ -195,7 +195,7 @@ function show(d){
  if(canPreview)get('preview').onclick=async()=>{
   const button=get('preview'),panel=get('filePreview');
   button.disabled=true;
-  try{await preview(d)}catch{if(panel.isConnected)panel.textContent='ເປີດໄຟລ໌ບໍ່ສຳເລັດ.'}
+  try{await preview(d, canDownload)}catch{if(panel.isConnected)panel.textContent='ເປີດໄຟລ໌ບໍ່ສຳເລັດ.'}
   finally{button.disabled=false}
  };
  if(canDownload)get('download').onclick=()=>download(d).catch(modalError);
