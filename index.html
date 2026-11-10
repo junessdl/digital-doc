@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="lo">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://pmtneugmshrpchloxmge.supabase.co; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Digital Doc</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#142340;font:15px system-ui,sans-serif}aside{background:#101e38;color:white;width:234px;min-height:100vh;padding:28px 18px;position:fixed}strong{font-size:23px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:54px}.logo{background:#4779ff;padding:8px;border-radius:11px}nav{display:grid;gap:8px}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0;border-radius:8px;padding:10px 14px;background:#eaf0ff;color:#234493}nav button{text-align:left;background:transparent;color:#c7d3ea}nav button.active{background:#253d68;color:white}main{margin-left:234px;padding:34px;max-width:1440px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.primary{background:#2959df;color:white}small,.muted{color:#586983}.eyebrow{color:#315bcb;font-size:12px;letter-spacing:2px;font-weight:800}h1{margin:8px 0;font-size:32px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:26px 0}.card,section{background:white;border:1px solid #e0e7f2;border-radius:14px;padding:20px}.number{display:block;font-size:29px;margin-top:8px}.tools{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}input,select,textarea{border:1px solid #cdd8e8;border-radius:8px;padding:9px;background:white;color:inherit;max-width:100%}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #edf1f7}th{color:#586983;font-weight:500}.badge{display:inline-block;border-radius:30px;background:#edf1fa;padding:5px 10px;white-space:nowrap}.s1{background:#fff1d3;color:#805300}.s2{background:#dff7eb;color:#176543}.s3{background:#ffe9e7;color:#972d27}.scroll{overflow:auto}dialog{border:0;border-radius:16px;padding:24px;width:min(92vw,510px);color:inherit}dialog::backdrop{background:#101e3870}form,label{display:grid;gap:10px}h2{margin:0 0 12px}footer{margin-top:22px}.team{margin-top:30px;color:#c7d3ea}@media(max-width:720px){aside{position:static;width:auto;min-height:0;padding:14px}.brand{margin-bottom:10px}nav{display:flex;flex-wrap:wrap}.team{display:none}main{margin:0;padding:16px}.cards{gap:7px}.card,section{padding:12px}h1{font-size:23px}}
+
+[hidden]{display:none!important}#login{max-width:440px;margin:10vh auto}#login label{margin:10px 0}#shell main{min-height:100vh}#status{min-height:22px}a{color:#2959df}.sidebar-footer{margin-top:26px;color:#c7d3ea}.wide{min-width:590px}button:disabled{opacity:.55}
+</style>
+<section id="login"><div class="eyebrow">DIGITAL DOC WORKSPACE</div><h1>ເຂົ້າລະບົບ</h1>
+<form id="credentials">
+<label>ອີເມວ <input name="email" type="email" autocomplete="username" required></label>
+<label>ລະຫັດຜ່ານ <input name="password" type="password" autocomplete="current-password" required></label>
+<button>ເຂົ້າໃຊ້</button>
+</form></section>
+
+<div id="shell" hidden>
+<aside><div class="brand"><span class="logo">▤</span><strong>Digital Doc</strong></div><nav id="nav"></nav><div class="sidebar-footer" id="teamCount"></div></aside>
+<main>
+<div class="top"><div><div class="eyebrow">DIGITAL DOC WORKSPACE</div><h1 id="title">ໜ້າຫຼັກ</h1></div><button class="primary" id="add">+ ເພີ່ມເອກະສານ</button></div>
+<p class="muted"><span id="identity"></span> · <button id="logout">ອອກຈາກລະບົບ</button></p>
+<p id="status" role="status"></p><div id="cards" class="cards"></div><section id="panel"></section>
+</main></div>
+<p id="loginStatus" role="status" style="text-align:center"></p>
+<dialog id="modal"></dialog>
+<script>
+const endpoint = 'https://pmtneugmshrpchloxmge.supabase.co';
+const key = 'sb_publishable_R_lf-SNnCY7GPXGG7y9iOw_MNSXpgPL';
+const storage = '/storage/v1/object';
+const bucket = 'digital-doc-files';
+const get = id => document.getElementById(id);
+let session;
+function status(message){get(session?'status':'loginStatus').textContent=message}
+async function request(path,{method='GET',body,type='application/json',token=session}={}){
+ const headers={apikey:key};
+ if(token)headers.Authorization='Bearer '+token;
+ if(body)headers['Content-Type']=type;
+ const result=await fetch(endpoint+path,{method,headers,body,cache:'no-store'});
+ if(result.status===401&&token&&token===session){logout('ເຊດຊັນໝົດອາຍຸ ກະລຸນາເຂົ້າລະບົບໃໝ່.');throw new Error('401')}
+ if(!result.ok)throw new Error(String(result.status));
+ return result;
+}
+
+const tabs=['ໜ້າຫຼັກ','ເອກະສານ','ກວດອະນຸມັດ','ສະມາຊິກ'];
+const groups=['ບໍລິຫານ','ການເງິນ','ລາຍງານ','ອື່ນໆ'];
+const states={draft:'ສະບັບຮ່າງ',pending:'ລໍຖ້າກວດ',approved:'ອະນຸມັດແລ້ວ',returned:'ສົ່ງກັບໃຫ້ແກ້',legacy:'ໄຟລ໌ເດີມ'};
+const colors={pending:'s1',approved:'s2',returned:'s3'};
+const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let me, people=[], docs=[], page=0, ready=false;
+const permissions={view:"ເບິ່ງລາຍລະອຽດ",download:"ດາວໂຫຼດໄຟລ໌",edit:"ແກ້ລາຍລະອຽດ ແລະ ດາວໂຫຼດ"};
+const send=(path,data,token=session)=>request(path,{method:'POST',body:JSON.stringify(data),token});
+function originalName(path){
+ const name=path.replace(/^[a-f0-9-]{36}--/,'');
+ try{return decodeURIComponent(name.replaceAll('_pct_','%'))}catch{return name}
+}
+async function list(path,token,body){
+ const result=[];
+ for(let offset=0;;offset+=100){
+  const response=body
+   ? await send(path,{...body,offset,limit:100},token)
+   : await request(path+'&offset='+offset+'&limit=100',{token});
+  const rows=await response.json();
+  result.push(...rows);
+  if(rows.length<100)return result;
+ }
+}
+async function load(){
+ const token=session;
+ const files=await list(storage+'/list/'+bucket,token,{prefix:'',sortBy:{column:'name',order:'asc'}});
+ let records=[],team=[];
+ try{
+  [records,team]=await Promise.all([
+   list('/rest/v1/digital_doc_records?select=id,owner,name,category,file_path,reviewer,status,created_at,access_map&order=created_at.desc,id.desc',token),
+   send('/rest/v1/rpc/digital_doc_team',{},token).then(r=>r.json())
+  ]);
+  ready=true;
+ }catch(error){
+  if(!['404','400'].includes(error.message))throw error;
+  ready=false;
+ }
+ if(session!==token)return;
+ people=team;
+ const indexed=new Set(records.map(d=>d.file_path));
+ docs=[...records,...files.filter(f=>f.id&&!indexed.has(f.name)).map(f=>({id:f.id,name:originalName(f.name),file_path:f.name,created_at:f.created_at,status:'legacy'}))];
+ render();
+}
+function render(){
+ get('title').textContent=tabs[page];
+ get('teamCount').textContent='◉ ທີມເອກະສານ'+(ready?' · '+people.length+' ຄົນ':'');
+ get('nav').innerHTML=tabs.map((label,i)=>'<button data-page="'+i+'" class="'+(page===i?'active':'')+'">'+['◈','▤','✓','♙'][i]+' &nbsp; '+label+'</button>').join('');
+ get('cards').hidden=page!==0;
+ get('cards').innerHTML=[['ເອກະສານທັງໝົດ',docs.length],[states.pending,docs.filter(d=>d.status==='pending').length],[states.approved,docs.filter(d=>d.status==='approved').length]].map(([label,n])=>'<div class="card">'+label+'<b class="number">'+n+'</b></div>').join('');
+ if(page===3){
+  get('panel').innerHTML='<h2>ສະມາຊິກ</h2>'+(ready?'<table><tbody>'+people.map(p=>'<tr><td>'+escape(p.email)+'</td><td>'+escape(p.role)+'</td></tr>').join('')+'</tbody></table>':'<p>ລັນໄຟລ໌ SQL ເພື່ອເປີດໃຊ້ລາຍຊື່ທີມ.</p>');
+  return;
+ }
+ get('panel').innerHTML='<h2>'+(page===2?'ລາຍການລໍຖ້າຂ້ອຍກວດ':'ຄັງເອກະສານ')+'</h2><div class="tools"><input id="query" type="search" aria-label="ຄົ້ນຫາ" placeholder="ຄົ້ນຫາຊື່ ຫຼື ເລກທີ"><select id="category" aria-label="ໝວດ"><option value="">ທຸກໝວດ</option>'+groups.map(g=>'<option>'+g+'</option>').join('')+'</select><button id="refresh">ໂຫຼດລາຍການໃໝ່</button></div><div class="scroll"><table class="wide"><thead><tr><th>ເອກະສານ</th><th>ໝວດ</th><th>ວັນທີ</th><th>ສະຖານະ</th></tr></thead><tbody id="rows"></tbody></table></div>';
+ get('query').oninput=rows; get('category').onchange=rows;
+ get('refresh').onclick=()=>load().catch(report);
+ rows();
+}
+function rows(){
+ const query=get('query').value.trim().toLowerCase(), group=get('category').value;
+ const filtered=docs.filter(d=>(page!==2||(d.status==='pending'&&d.reviewer===me.id))&&(!group||d.category===group)&&(d.name+' '+d.id).toLowerCase().includes(query));
+ get('rows').innerHTML=filtered.map(d=>'<tr><td><button data-doc="'+escape(d.id)+'">'+escape(d.name)+'</button></td><td>'+escape(d.category||'—')+'</td><td>'+escape(d.created_at?.slice(0,10)||'—')+'</td><td><span class="badge '+(colors[d.status]||'')+'">'+escape(states[d.status])+'</span></td></tr>').join('')||'<tr><td colspan="4">ບໍ່ພົບເອກະສານ</td></tr>';
+}
+function report(error){
+ status('ດຳເນີນການບໍ່ສຳເລັດ ('+(/^[0-9]{3}$/.test(error.message)?error.message:'ເຊື່ອມຕໍ່ບໍ່ໄດ້')+').');
+}
+function modalError(error){get('modalError').textContent='ດຳເນີນການບໍ່ສຳເລັດ ('+(/^[0-9]{3}$/.test(error.message)?error.message:'ເຊື່ອມຕໍ່ບໍ່ໄດ້')+').'}
+async function download(d){
+ const token=session;
+ const path=d.file_path.split('/').map(encodeURIComponent).join('/');
+ const response=await request(storage+'/authenticated/'+bucket+'/'+path,{token});
+ const blob=await response.blob();
+ if(session!==token)return;
+ const link=document.createElement('a');
+ link.href=URL.createObjectURL(blob);link.download=originalName(d.file_path);link.click();
+ setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+function show(d){
+ const m=get('modal');
+ const owned=d?.owner===me.id;
+ const access=d?.access_map?.[me.id];
+ const edit=d&&ready&&(owned||access==='edit');
+ const canDownload=d&&(owned||['download','edit'].includes(access)||me.role==='admin'||d.status==='legacy');
+ const submit=owned&&ready&&['draft','returned'].includes(d.status);
+ const review=d?.status==='pending'&&d.reviewer===me.id&&canDownload;
+ const reviewer=people.find(p=>p.user_id===d?.reviewer);
+ const selectable=people.filter(p=>p.user_id!==me.id);
+ const sharing=(!d||owned)&&ready;
+ const allowedReviewers=selectable.filter(p=>['download','edit'].includes(d?.access_map?.[p.user_id]));
+ const fields=(!d||edit)?'<label>ຊື່ເອກະສານ<input name="title" maxlength="200" required value="'+escape(d?.name)+'"></label><label>ໝວດ<select name="category">'+groups.map(g=>'<option '+(g===d?.category?'selected':'')+'>'+g+'</option>').join('')+'</select></label>':'';
+ const shareFields=sharing?'<fieldset><legend>ກຳນົດສິດລາຍຄົນ</legend>'+selectable.map(p=>'<label>'+escape(p.email)+'<select data-user="'+escape(p.user_id)+'"><option value="">ບໍ່ໃຫ້ສິດ</option>'+Object.entries(permissions).map(([value,label])=>'<option value="'+value+'" '+(d?.access_map?.[p.user_id]===value?'selected':'')+'>'+label+'</option>').join('')+'</select></label>').join('')+'</fieldset>':'';
+ m.innerHTML='<form><h2>'+escape(d?.name||'ເພີ່ມເອກະສານ')+'</h2>'+
+ (d?'<p>'+escape(states[d.status])+(reviewer?' · '+escape(reviewer.email):'')+'</p>':'')+
+ fields+(!d?'<label>ໄຟລ໌ (ສູງສຸດ 10 MB)<input name="file" type="file" required></label>':'')+
+ shareFields+(canDownload?'<button type="button" id="download">ດາວໂຫຼດ</button>':'')+
+ (submit&&allowedReviewers.length?'<label>ຜູ້ກວດ<select name="assigned"><option value="">ເລືອກຜູ້ກວດ</option>'+allowedReviewers.map(p=>'<option value="'+escape(p.user_id)+'">'+escape(p.email)+'</option>').join('')+'</select></label>':'')+
+ '<p id="modalError" role="status"></p><div class="tools"><button type="button" id="close">ປິດ</button>'+
+ (!d?'<button class="primary" value="upload">ອັບໂຫຼດ</button>':'')+
+ (edit?'<button class="primary" value="save">ບັນທຶກ</button>':'')+
+ (submit&&allowedReviewers.length?'<button value="pending">ສົ່ງໃຫ້ກວດ</button>':'')+
+ (review?'<button class="primary" value="approved">ອະນຸມັດ</button><button value="returned">ສົ່ງກັບ</button>':'')+'</div></form>';
+ get('close').onclick=()=>m.close();
+ if(canDownload)get('download').onclick=()=>download(d).catch(modalError);
+ m.querySelector('form').onsubmit=async event=>{
+  event.preventDefault();
+  if(!event.submitter)return;
+  const form=event.currentTarget, fields=new FormData(form), action=event.submitter.value,token=session;
+  const buttons=[...form.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+  const accessMap=Object.fromEntries([...form.querySelectorAll('[data-user]')].filter(select=>select.value).map(select=>[select.dataset.user,select.value]));
+  try{
+   if(action==='upload'){
+    const file=fields.get('file'),title=fields.get('title')?.trim();
+    if(!file?.name||!file.size||file.size>10485760||!/\.(pdf|docx?|xlsx?|pptx?|png|jpe?g|txt|csv)$/i.test(file.name)||(ready&&!title)){get('modalError').textContent='ກະລຸນາກວດຊື່, ປະເພດໄຟລ໌ (PDF/Office/ຮູບ/TXT/CSV) ແລະ ຂະໜາດ (ສູງສຸດ 10 MB).';return}
+    const name=file.name.normalize('NFC').replace(/[^\p{L}\p{N}\p{M}._ -]/gu,'_').slice(0,100);
+    const path=crypto.randomUUID()+'--'+encodeURIComponent(name).replaceAll('%','_pct_');
+    await request(storage+'/'+bucket+'/'+encodeURIComponent(path),{method:'POST',body:file,type:'application/octet-stream',token});
+    if(ready){
+     try{await send('/rest/v1/digital_doc_records',{name:title,category:fields.get('category'),file_path:path,access_map:accessMap},token)}
+     catch{m.close();await load();status('ໄຟລ໌ຖືກອັບໂຫຼດແລ້ວ ແຕ່ບັນທຶກລາຍລະອຽດບໍ່ສຳເລັດ. ໄຟລ໌ຢູ່ໃນລາຍການໄຟລ໌ເດີມ.');return}
+    }
+   }else if(action==='save'){
+    await send('/rest/v1/rpc/digital_doc_edit',{record_id:d.id,new_name:fields.get('title').trim(),new_category:fields.get('category'),shares:owned?accessMap:null},token);
+   }else{
+    if(action==='pending'&&!fields.get('assigned')){get('modalError').textContent='ກະລຸນາເລືອກຜູ້ກວດ.';return}
+    await send('/rest/v1/rpc/digital_doc_transition',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null},token);
+   }
+   m.close();await load();status('ບັນທຶກສຳເລັດ.');
+  }catch(error){if(m.open)modalError(error);else report(error)}
+  finally{buttons.forEach(b=>b.disabled=false)}
+ };
+ m.showModal();
+}
+get('credentials').onsubmit=async event=>{
+ event.preventDefault();
+ const form=event.currentTarget,fields=new FormData(form),button=event.submitter;
+ button.disabled=true;status('');
+ try{
+  const data=await send('/auth/v1/token?grant_type=password',{email:fields.get('email').trim(),password:fields.get('password')}).then(r=>r.json());
+  const token=data.access_token;
+  const [member]=await request('/rest/v1/digital_doc_members?select=role&user_id=eq.'+encodeURIComponent(data.user.id),{token}).then(r=>r.json());
+  if(!member){status('ບັນຊີນີ້ບໍ່ມີສິດໃຊ້ Digital Doc.');return}
+  session=token;me={...data.user,role:member.role};
+  get('identity').textContent=me.email+' · '+(me.role==='admin'?'Admin':'ສະມາຊິກ');
+  get('login').hidden=true;get('shell').hidden=false;get('loginStatus').textContent='';
+  await load();
+  if(!ready)status('ອັບໂຫຼດແລະດາວໂຫຼດໄດ້. ລັນ digital-doc-permissions.sql ເພື່ອເປີດໃຊ້ສິດລາຍຄົນ.');
+ }catch(error){
+  if(!session&&['400','401'].includes(error.message))status('ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ.');
+  else report(error);
+ }finally{if(session)form.reset();else form.elements.password.value='';button.disabled=false}
+};
+get('nav').onclick=e=>{const b=e.target.closest('[data-page]');if(b){page=Number(b.dataset.page);status('');render()}};
+get('panel').onclick=e=>{const b=e.target.closest('[data-doc]');if(b)show(docs.find(d=>d.id===b.dataset.doc))};
+get('add').onclick=()=>{if(ready)show();else status('ກະລຸນາລັນ digital-doc-permissions.sql ກ່ອນອັບໂຫຼດ.');};
+get('logout').onclick=()=>logout();
+function logout(message='ອອກຈາກລະບົບແລ້ວ.'){
+ session=undefined;me=undefined;people=[];docs=[];page=0;ready=false;
+ get('panel').replaceChildren();get('status').textContent='';get('identity').textContent='';
+ if(get('modal').open)get('modal').close();get('modal').replaceChildren();get('shell').hidden=true;get('login').hidden=false;
+ status(message);
+}
+</script>
+</html>
