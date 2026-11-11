@@ -98,12 +98,14 @@ async function load(){
  else render();
 }
 function updateCards(){
+ const badge=get('mine');
+ if(badge){const n=docs.filter(d=>d.status==='pending'&&(d.reviewer===me.id||me.role==='admin')).length;badge.textContent=n?' · '+n:''}
  get('teamCount').textContent='◉ ທີມເອກະສານ'+(ready?' · '+people.length+' ຄົນ':'');
  get('cards').innerHTML=[['ເອກະສານທັງໝົດ',docs.length],[states.pending,docs.filter(d=>d.status==='pending').length],[states.approved,docs.filter(d=>d.status==='approved').length]].map(([label,n])=>'<div class="card">'+label+'<b class="number">'+n+'</b></div>').join('');
 }
 function render(){
  get('title').textContent=tabs[page];
- get('nav').innerHTML=tabs.map((label,i)=>'<button data-page="'+i+'" class="'+(page===i?'active':'')+'">'+['◈','▤','✓','♙'][i]+' &nbsp; '+label+'</button>').join('');
+ get('nav').innerHTML=tabs.map((label,i)=>'<button data-page="'+i+'" class="'+(page===i?'active':'')+'">'+['◈','▤','✓','♙'][i]+' &nbsp; '+label+(i===2?'<span id="mine"></span>':'')+'</button>').join('');
  get('cards').hidden=page!==0;
  updateCards();
  if(page===3){
@@ -120,10 +122,12 @@ function rows(){
  const filtered=docs.filter(d=>(page!==2||(d.status==='pending'&&(d.reviewer===me.id||me.role==='admin')))&&(!group||d.category===group)&&(d.name+' '+d.id).toLowerCase().includes(query));
  get('rows').innerHTML=filtered.map(d=>'<tr><td><button data-doc="'+escape(d.id)+'">'+escape(d.name)+'</button></td><td>'+escape(d.category||'—')+'</td><td>'+escape(d.created_at?.slice(0,10)||'—')+'</td><td><span class="badge '+(colors[d.status]||'')+'">'+escape(states[d.status])+'</span></td></tr>').join('')||'<tr><td colspan="4">ບໍ່ພົບເອກະສານ</td></tr>';
 }
-function report(error){
- status('ດຳເນີນການບໍ່ສຳເລັດ ('+(/^[0-9]{3}$/.test(error.message)?error.message:'ເຊື່ອມຕໍ່ບໍ່ໄດ້')+').');
+function why(error){
+ const text={403:'ບໍ່ມີສິດດຳເນີນການນີ້',409:'ເອກະສານຖືກປ່ຽນແລ້ວ ກະລຸນາປິດແລ້ວເປີດໃໝ່',404:'ບໍ່ພົບຂໍ້ມູນ'}[error.message];
+ return text||('ດຳເນີນການບໍ່ສຳເລັດ ('+(/^[0-9]{3}$/.test(error.message)?error.message:'ເຊື່ອມຕໍ່ບໍ່ໄດ້')+').');
 }
-function modalError(error){get('modalError').textContent='ດຳເນີນການບໍ່ສຳເລັດ ('+(/^[0-9]{3}$/.test(error.message)?error.message:'ເຊື່ອມຕໍ່ບໍ່ໄດ້')+').'}
+function report(error){status(why(error))}
+function modalError(error){get('modalError').textContent=why(error)}
 async function download(d){
  const token=session;
  const path=d.file_path.split('/').map(encodeURIComponent).join('/');
@@ -170,6 +174,8 @@ function show(d){
  const canPreview=d&&(canDownload||access==='view')&&/\.(pdf|png|jpe?g)$/i.test(originalName(d.file_path));
  const adminReview=d?.status==='pending'&&me.role==='admin';
  const review=d?.status==='pending'&&d.reviewer===me.id&&canDownload;
+ const admins=people.filter(p=>p.role==='admin').length;
+ const canDecide=(review||adminReview)&&!(owned&&admins>1);
  const canRevise=edit&&d.status!=='approved'&&me.role!=='admin';
  const reviewer=people.find(p=>p.user_id===d?.reviewer);
  const selectable=people.filter(p=>p.user_id!==me.id);
@@ -195,8 +201,8 @@ function show(d){
  (edit?'<button class="primary" value="save">ບັນທຶກ</button>':'')+
  (submit&&allowedReviewers.length?'<button value="pending">ສົ່ງໃຫ້ກວດ</button>':'')+
  (canRevise?'<button class="primary" value="revision" formnovalidate>ສົ່ງໄຟລ໌ສະບັບແກ້</button>':'')+
- (adminReview?'<button class="primary" value="approved" formnovalidate>ຢືນຢັນສົມບູນ</button>':'')+
- ((review||adminReview)?'<button value="returned" formnovalidate>ສົ່ງກັບໃຫ້ແກ້</button>':'')+'</div></form>';
+ (canDecide?'<button class="primary" value="approved" formnovalidate>ຢືນຢັນ / ອະນຸມັດ</button>':'')+
+ (canDecide?'<button value="returned" formnovalidate>ສົ່ງກັບໃຫ້ແກ້</button>':'')+'</div></form>';
  get('close').onclick=()=>m.close();
  if(canPreview)get('preview').onclick=async()=>{
   const button=get('preview'),panel=get('filePreview');
@@ -242,8 +248,8 @@ function show(d){
     if(action==='pending'&&!fields.get('assigned')){get('modalError').textContent='ກະລຸນາເລືອກຜູ້ກວດ.';return}
     const reason=fields.get('reason')?.trim()||null;
     if(action==='returned'&&!reason){get('modalError').textContent='ກະລຸນາໃສ່ເຫດຜົນທີ່ສົ່ງກັບ.';form.elements.reason.focus();return}
-    if(adminReview&&['approved','returned'].includes(action)){
-     await send('/rest/v1/rpc/digital_doc_admin_decision',{record_id:d.id,expected_path:d.file_path,decision:action,note:reason},token);
+    if(canDecide&&['approved','returned'].includes(action)){
+     await send('/rest/v1/rpc/digital_doc_decide',{record_id:d.id,expected_path:d.file_path,decision:action,note:reason},token);
     }else await send('/rest/v1/rpc/digital_doc_review_exchange',{record_id:d.id,next_status:action,assigned:fields.get('assigned')||null,reason},token);
    }
    m.close();if(reading)await reading.catch(()=>{});if(session!==token)return;await load();status('ບັນທຶກສຳເລັດ.');
@@ -264,7 +270,7 @@ get('credentials').onsubmit=async event=>{
   session=token;me={...data.user,role:member.role};
   get('identity').textContent=me.email+' · '+(me.role==='admin'?'Admin':'ສະມາຊິກ');
   get('login').hidden=true;get('shell').hidden=false;get('loginStatus').textContent='';
-  clearInterval(poll);poll=setInterval(sync,4000);
+  clearInterval(poll);poll=setInterval(sync,15000);
   await load();
   if(!ready)status('ອັບໂຫຼດແລະດາວໂຫຼດໄດ້. ລັນ digital-doc-permissions.sql ເພື່ອເປີດໃຊ້ສິດລາຍຄົນ.');
  }catch(error){
